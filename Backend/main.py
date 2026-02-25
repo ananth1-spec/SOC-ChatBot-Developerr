@@ -87,7 +87,7 @@ async def chat(req: ChatRequest):
     request_id = str(uuid.uuid4())
     REQUEST_STATUS[request_id] = "processing"
 
-    # 1️⃣ Call embedding service via HTTP
+    # 1️⃣ Call embedding service
     try:
         async with httpx.AsyncClient(timeout=60.0) as client:
             embed_response = await client.post(
@@ -95,18 +95,22 @@ async def chat(req: ChatRequest):
                 json={"text": req.text}
             )
             embed_response.raise_for_status()
-            embedding = embed_response.json()["embedding"]
+            embedding = embed_response.json().get("embedding")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Embedding service error: {str(e)}")
+
+    if not embedding:
+        raise HTTPException(status_code=500, detail="Failed to generate embedding")
 
     # 2️⃣ Build retrieval payload
     payload = {
         "request_id": request_id,
         "embedding": embedding,
-        "top_k": req.top_k
+        "top_k": req.top_k,
+        "query": req.text   # 🔥 CRITICAL FIX — Send user question to RAG
     }
 
-    # 3️⃣ Query retrieval service
+    # 3️⃣ Call retrieval service
     result = await query_knowledge_base(payload)
 
     # 4️⃣ Store result
@@ -129,7 +133,7 @@ async def chat(req: ChatRequest):
     )
 
 # -------------------------
-# STATUS
+# STATUS CHECK
 # -------------------------
 @app.get("/status/{request_id}")
 async def check_status(request_id: str):
